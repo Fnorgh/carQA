@@ -49,7 +49,6 @@ class TestSubMaster:
     sm.update(1000)
     assert_carstate(msg.carState, sm[sock])
 
-  # TODO: break this test up to individually test SubMaster.update and SubMaster.update_msgs
   def test_update(self):
     sock = "carState"
     pub_sock = messaging.pub_sock(sock)
@@ -62,6 +61,32 @@ class TestSubMaster:
       sm.update(1000)
       assert sm.frame == i
       assert all(sm.updated.values())
+
+  def test_udpate_msgs(self):
+    sock1 = "carState"
+    sock2 = "roadCameraState"
+
+    pub_sock1 = messaging.pub_sock(sock1)
+    pub_sock2 = messaging.pub_sock(sock2)
+    sm = messaging.SubMaster([sock1, sock2], poll=sock1)
+    zmq_sleep()
+
+    for i in range(5):
+      msg1 = messaging.new_message(sock1)
+      msg2 = messaging.new_message(sock2)
+
+      pub_sock1.send(msg1.to_bytes())
+      pub_sock2.send(msg2.to_bytes())
+
+      sm.update(1000)
+
+      assert sm.frame == i
+
+      assert all(sm.updated.values())
+
+      assert all(sm.alive.values())
+
+    pass
 
   def test_update_timeout(self):
     sock = random_sock()
