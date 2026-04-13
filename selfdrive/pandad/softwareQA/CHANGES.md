@@ -72,10 +72,3 @@ The original `test_spi_corruption()` test was missing the following scenarios.
 All additions are isolated in `softwareQA/pandad_spi/` to keep QA work separate from the main test suite.
 
 ---
-
-## How to Run
-
-```bash
-# from repo root
-python -m pytest selfdrive/pandad/softwareQA/pandad_spi/test_pandad_spi_edgecases.py -v
-```
