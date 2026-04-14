@@ -7,6 +7,7 @@ from cereal.messaging.tests.test_messaging import events, random_sock, random_so
                                                   random_bytes, random_carstate, assert_carstate, \
                                                   zmq_sleep
 from cereal.services import SERVICE_LIST
+from msgq import pub_sock
 
 
 class TestSubMaster:
@@ -86,8 +87,6 @@ class TestSubMaster:
 
       assert all(sm.alive.values())
 
-    pass
-
   def test_update_timeout(self):
     sock = random_sock()
     sm = messaging.SubMaster([sock,])
@@ -129,7 +128,17 @@ class TestSubMaster:
     pass
 
   def test_valid(self):
-    pass
+      sock = "carState"
+      pub_sock = messaging.pub_sock(sock)
+      sm = messaging.SubMaster([sock,])
+      zmq_sleep()
+
+      msg = messaging.new_message(sock)
+      msg.valid = True
+      pub_sock.send(msg.to_bytes())
+      sm.update(1000)
+
+      assert sm.valid[sock] == True
 
   # SubMaster should always conflate
   def test_conflate(self):
