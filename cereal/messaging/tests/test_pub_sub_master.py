@@ -121,24 +121,105 @@ class TestSubMaster:
         else:
           assert not sm._check_avg_freq(service)
 
-  def test_alive(self):
-    pass
+  def test_alive_simulation(self, monkeypatch):
+    sock = "carState"
+    pub_sock = messaging.pub_sock(sock)
 
-  def test_ignore_alive(self):
-    pass
+    # Force simulation mode
+    monkeypatch.setenv("SIMULATION", "1")
 
-  def test_valid(self):
-      sock = "carState"
-      pub_sock = messaging.pub_sock(sock)
-      sm = messaging.SubMaster([sock,])
-      zmq_sleep()
+    sm = messaging.SubMaster([sock,])
+    zmq_sleep()
 
-      msg = messaging.new_message(sock)
-      msg.valid = True
-      pub_sock.send(msg.to_bytes())
-      sm.update(1000)
+    msg = messaging.new_message(sock)
+    msg.valid = True
+    pub_sock.send(msg.to_bytes())
+    sm.update(1000)
 
-      assert sm.valid[sock] == True
+    # In simulation, alive should ALWAYS be true
+    assert sm.alive[sock] == True
+
+  def test_alive_low_frequency(self, monkeypatch):
+    sock = "carState"
+    pub_sock = messaging.pub_sock(sock)
+
+    # Force no simulation mode
+    monkeypatch.delenv("SIMULATION", raising=False)
+
+    # Mock low frequency
+    monkeypatch.setattr(SERVICE_LIST[sock], "frequency", 0.0)
+
+    sm = messaging.SubMaster([sock,])
+    zmq_sleep()
+
+    msg = messaging.new_message(sock)
+    pub_sock.send(msg.to_bytes())
+    sm.update(1000)
+
+    # Even after long delay, should STILL be alive
+    time.sleep(0.2)
+    sm.update(0)
+
+    assert sm.alive[sock] == True
+
+  def test_alive_high_frequency(self, monkeypatch):
+    sock = "carState"
+    pub_sock = messaging.pub_sock(sock)
+
+    # Force no simulation mode
+    monkeypatch.delenv("SIMULATION", raising=False)
+
+    # Mock high frequency: should become stale after 0.1s (10 msgs/s)
+    monkeypatch.setattr(SERVICE_LIST[sock], "frequency", 100.0)
+
+    sm = messaging.SubMaster([sock,])
+    zmq_sleep()
+
+    msg = messaging.new_message(sock)
+    msg.valid = True
+    pub_sock.send(msg.to_bytes())
+    sm.update(1000)
+
+    # Initially alive
+    assert sm.alive[sock] == True
+
+    # Sleep long enough to exceed (10 / 100 = 0.1s)
+    time.sleep(0.2)
+
+    sm.update(0)
+
+    # Now, should be stale
+    assert sm.alive[sock] == False
+
+  def test_ignore_alive(self, monkeypatch):
+    sock = "carState"
+    pub_sock = messaging.pub_sock(sock)
+
+    monkeypatch.delenv("SIMULATION", raising=False)
+
+    # Mock high frequency
+    monkeypatch.setattr(SERVICE_LIST[sock], "frequency", 100.0)
+
+    sm = messaging.SubMaster([sock,], ignore_alive=[sock])
+    zmq_sleep()
+
+    msg = messaging.new_message(sock)
+    msg.valid = True
+    pub_sock.send(msg.to_bytes())
+    sm.update(1000)
+
+    # Initially alive
+    assert sm.alive[sock] == True
+
+    # Let it go stale
+    time.sleep(0.2)
+    sm.update(0)
+
+    # Now it's NOT alive internally
+    assert sm.alive[sock] == False
+
+    # Run all_alive to check that ignore_alive works correctly
+    assert sm.all_alive() == True
 
   # SubMaster should always conflate
   def test_conflate(self):
