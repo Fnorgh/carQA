@@ -27,8 +27,6 @@ def zmq_sleep(t=1):
   if "ZMQ" in os.environ:
     time.sleep(t)
 
-
-# TODO: this should take any capnp struct and returrn a msg with random populated data
 def random_carstate():
   fields = ["vEgo", "aEgo", "brake", "steeringAngleDeg"]
   msg = messaging.new_message("carState")
@@ -37,13 +35,40 @@ def random_carstate():
     setattr(cs, f, random.random() * 10)
   return msg
 
-# TODO: this should compare any capnp structs
-def assert_carstate(cs1, cs2):
-  for f in car.CarState.schema.non_union_fields:
-    # TODO: check all types
-    val1, val2 = getattr(cs1, f), getattr(cs2, f)
-    if isinstance(val1, numbers.Number):
-      assert val1 == val2, f"{f}: sent '{val1}' vs recvd '{val2}'"
+def assert_carstate(cs1, cs2, path=""):
+    for f in cs1.schema.non_union_fields:
+        val1 = getattr(cs1, f)
+        val2 = getattr(cs2, f)
+        field_path = f"{path}.{f}" if path else f
+
+        if val1 is None and val2 is None:
+            continue
+
+        if isinstance(val1, numbers.Number):
+            assert val1 == val2, f"{field_path}: sent '{val1}' vs recvd '{val2}'"
+        elif isinstance(val1, bool):
+            assert val1 == val2, f"{field_path}: sent '{val1}' vs recvd '{val2}'"
+        elif isinstance(val1, str):
+            assert val1 == val2, f"{field_path}: sent '{val1}' vs recvd '{val2}'"
+        elif isinstance(val1, (list, tuple)):
+            assert len(val1) == len(val2), \
+                f"{field_path}: length mismatch - sent '{len(val1)}' vs recvd '{len(val2)}'"
+            if len(val1) > 0:
+                first_elem = val1[0]
+                if isinstance(first_elem, numbers.Number):
+                    for i, (v1, v2) in enumerate(zip(val1, val2)):
+                        assert v1 == v2, f"{field_path}[{i}]: sent '{v1}' vs recvd '{v2}'"
+                elif isinstance(first_elem, bool):
+                    for i, (v1, v2) in enumerate(zip(val1, val2)):
+                        assert v1 == v2, f"{field_path}[{i}]: sent '{v1}' vs recvd '{v2}'"
+                elif isinstance(first_elem, str):
+                    for i, (v1, v2) in enumerate(zip(val1, val2)):
+                        assert v1 == v2, f"{field_path}[{i}]: sent '{v1}' vs recvd '{v2}'"
+                elif hasattr(first_elem, '__dict__') or hasattr(first_elem, 'schema'):
+                    for i, (v1, v2) in enumerate(zip(val1, val2)):
+                        assert_carstate(v1, v2, f"{field_path}[{i}]")
+        elif hasattr(val1, 'schema') or hasattr(val1, '__dict__'):
+            assert_carstate(val1, val2, field_path)
 
 def delayed_send(delay, sock, dat):
   def send_func():
