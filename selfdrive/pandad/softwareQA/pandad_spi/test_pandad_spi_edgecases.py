@@ -2,10 +2,8 @@ import os
 import time
 import numpy as np
 import pytest
-import random
 
 import cereal.messaging as messaging
-from cereal.services import SERVICE_LIST
 from openpilot.selfdrive.test.helpers import with_processes
 from openpilot.selfdrive.pandad.tests.test_pandad_loopback import setup_pandad, send_random_can_messages
 
@@ -124,3 +122,115 @@ class TestBoarddSpiEdgeCases:
       assert 0 <= rpm < 10000, (
         f"fanSpeedRpm {rpm} is out of valid range [0, 10000)"
       )
+
+  # ── Test 5: Voltage exact boundary values ─────────────────────────────────
+  @with_processes(['pandad'])
+  def test_voltage_boundary_values(self):
+    """
+    MISSING FROM: test_spi_corruption()
+    Original uses strict < / > so exact boundary values 4000 and 14000
+    would wrongly fail. Should be <= / >= — this test catches that regression.
+    """
+    setup_pandad()
+    sock = messaging.sub_sock('pandaStates', conflate=False, timeout=2000)
+    time.sleep(2)
+
+    msgs = messaging.drain_sock(sock)
+    assert len(msgs) > 0, "No pandaStates messages received"
+
+    for m in msgs:
+      ps = m.pandaStates[0]
+      assert 4000 <= ps.voltage <= 14000, (
+        f"Voltage {ps.voltage} mV outside valid range [4000, 14000]\n"
+        f"Note: boundary values 4000 and 14000 are explicitly valid"
+      )
+
+  # ── Test 6: uptime lower bound ────────────────────────────────────────────
+  @with_processes(['pandad'])
+  def test_panda_uptime_is_nonzero(self):
+    """
+    MISSING FROM: test_spi_corruption()
+    Original only checks ps.uptime < 1000.
+    uptime = 0 means pandad never properly started — lower bound never checked.
+    """
+    setup_pandad()
+    sock = messaging.sub_sock('pandaStates', conflate=False, timeout=2000)
+    time.sleep(2)
+
+    msgs = messaging.drain_sock(sock)
+    assert len(msgs) > 0, "No pandaStates messages received"
+
+    for m in msgs:
+      ps = m.pandaStates[0]
+      assert 0 < ps.uptime < 1000, (
+        f"uptime={ps.uptime} invalid — must be > 0 (pandad started) and < 1000"
+      )
+
+  # ── Test 7: packet drop ratio ─────────────────────────────────────────────
+  @with_processes(['pandad'])
+  def test_can_packet_drop_ratio(self):
+    """
+    MISSING FROM: test_spi_corruption()
+    Original only checks total_recv_count > 20 — never checks ratio against
+    what was actually sent. Could receive 21/500 and still pass.
+    """
+    setup_pandad()
+    sendcan = messaging.pub_sock('sendcan')
+    can_sock = messaging.sub_sock('can', conflate=False, timeout=1000)
+    time.sleep(1)
+    messaging.drain_sock_raw(can_sock)
+
+    sent_msgs = {bus: list() for bus in range(3)}
+    for _ in range(10):
+      new_msgs = send_random_can_messages(sendcan, 10)
+      for bus, msgs in new_msgs.items():
+        sent_msgs[bus].extend(msgs)
+      time.sleep(0.1)
+
+    total_sent = sum(len(v) for v in sent_msgs.values())
+    time.sleep(1)
+
+    recv_msgs = messaging.drain_sock(can_sock)
+    total_recv = sum(len(m.can) for m in recv_msgs)
+
+    assert total_sent > 0, "No messages were sent — send_random_can_messages may have failed"
+
+    ratio = total_recv / total_sent
+    print(f"\nSent {total_sent}, received {total_recv} ({ratio:.2%})")
+    assert ratio >= 0.8, (
+      f"Too many dropped packets — only {ratio:.2%} received\n"
+      f"Sent: {total_sent}  Received: {total_recv}"
+    )
+
+  # ── Test 8: SPI zero error rate clean baseline ────────────────────────────
+  @with_processes(['pandad'])
+  def test_spi_zero_error_rate_baseline(self):
+    """
+    MISSING FROM: test_spi_corruption()
+    Tests always run at SPI_ERR_PROB=0.001 — a clean zero-error baseline
+    is never verified. With 0 errors, recv ratio must be near 100%.
+    """
+    os.environ['SPI_ERR_PROB'] = '0'
+    setup_pandad()
+
+    sendcan = messaging.pub_sock('sendcan')
+    can_sock = messaging.sub_sock('can', conflate=False, timeout=1000)
+    time.sleep(1)
+    messaging.drain_sock_raw(can_sock)
+
+    sent_msgs = send_random_can_messages(sendcan, 20)
+    total_sent = sum(len(v) for v in sent_msgs.values())
+    time.sleep(1)
+
+    recv_msgs = messaging.drain_sock(can_sock)
+    total_recv = sum(len(m.can) for m in recv_msgs)
+
+    assert total_sent > 0, "send_random_can_messages sent 0 messages"
+    ratio = total_recv / total_sent
+    print(f"\n[zero error] Sent {total_sent}, received {total_recv} ({ratio:.2%})")
+    assert ratio >= 0.95, (
+      f"With SPI_ERR_PROB=0, expected >=95% delivery, got {ratio:.2%}"
+    )
+
+    # restore default
+    os.environ['SPI_ERR_PROB'] = '0.001'
