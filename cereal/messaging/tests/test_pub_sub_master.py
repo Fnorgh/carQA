@@ -7,6 +7,7 @@ from cereal.messaging.tests.test_messaging import events, random_sock, random_so
                                                   random_bytes, random_carstate, assert_carstate, \
                                                   zmq_sleep
 from cereal.services import SERVICE_LIST
+from msgq import pub_sock
 
 
 class TestSubMaster:
@@ -49,7 +50,6 @@ class TestSubMaster:
     sm.update(1000)
     assert_carstate(msg.carState, sm[sock])
 
-  # TODO: break this test up to individually test SubMaster.update and SubMaster.update_msgs
   def test_update(self):
     sock = "carState"
     pub_sock = messaging.pub_sock(sock)
@@ -62,6 +62,30 @@ class TestSubMaster:
       sm.update(1000)
       assert sm.frame == i
       assert all(sm.updated.values())
+
+  def test_udpate_msgs(self):
+    sock1 = "carState"
+    sock2 = "roadCameraState"
+
+    pub_sock1 = messaging.pub_sock(sock1)
+    pub_sock2 = messaging.pub_sock(sock2)
+    sm = messaging.SubMaster([sock1, sock2], poll=sock1)
+    zmq_sleep()
+
+    for i in range(5):
+      msg1 = messaging.new_message(sock1)
+      msg2 = messaging.new_message(sock2)
+
+      pub_sock1.send(msg1.to_bytes())
+      pub_sock2.send(msg2.to_bytes())
+
+      sm.update(1000)
+
+      assert sm.frame == i
+
+      assert all(sm.updated.values())
+
+      assert all(sm.alive.values())
 
   def test_update_timeout(self):
     sock = random_sock()
@@ -97,14 +121,105 @@ class TestSubMaster:
         else:
           assert not sm._check_avg_freq(service)
 
-  def test_alive(self):
-    pass
+  def test_alive_simulation(self, monkeypatch):
+    sock = "carState"
+    pub_sock = messaging.pub_sock(sock)
 
-  def test_ignore_alive(self):
-    pass
+    # Force simulation mode
+    monkeypatch.setenv("SIMULATION", "1")
 
-  def test_valid(self):
-    pass
+    sm = messaging.SubMaster([sock,])
+    zmq_sleep()
+
+    msg = messaging.new_message(sock)
+    msg.valid = True
+    pub_sock.send(msg.to_bytes())
+    sm.update(1000)
+
+    # In simulation, alive should ALWAYS be true
+    assert sm.alive[sock] == True
+
+  def test_alive_low_frequency(self, monkeypatch):
+    sock = "carState"
+    pub_sock = messaging.pub_sock(sock)
+
+    # Force no simulation mode
+    monkeypatch.delenv("SIMULATION", raising=False)
+
+    # Mock low frequency
+    monkeypatch.setattr(SERVICE_LIST[sock], "frequency", 0.0)
+
+    sm = messaging.SubMaster([sock,])
+    zmq_sleep()
+
+    msg = messaging.new_message(sock)
+    pub_sock.send(msg.to_bytes())
+    sm.update(1000)
+
+    # Even after long delay, should STILL be alive
+    time.sleep(0.2)
+    sm.update(0)
+
+    assert sm.alive[sock] == True
+
+  def test_alive_high_frequency(self, monkeypatch):
+    sock = "carState"
+    pub_sock = messaging.pub_sock(sock)
+
+    # Force no simulation mode
+    monkeypatch.delenv("SIMULATION", raising=False)
+
+    # Mock high frequency: should become stale after 0.1s (10 msgs/s)
+    monkeypatch.setattr(SERVICE_LIST[sock], "frequency", 100.0)
+
+    sm = messaging.SubMaster([sock,])
+    zmq_sleep()
+
+    msg = messaging.new_message(sock)
+    msg.valid = True
+    pub_sock.send(msg.to_bytes())
+    sm.update(1000)
+
+    # Initially alive
+    assert sm.alive[sock] == True
+
+    # Sleep long enough to exceed (10 / 100 = 0.1s)
+    time.sleep(0.2)
+
+    sm.update(0)
+
+    # Now, should be stale
+    assert sm.alive[sock] == False
+
+  def test_ignore_alive(self, monkeypatch):
+    sock = "carState"
+    pub_sock = messaging.pub_sock(sock)
+
+    monkeypatch.delenv("SIMULATION", raising=False)
+
+    # Mock high frequency
+    monkeypatch.setattr(SERVICE_LIST[sock], "frequency", 100.0)
+
+    sm = messaging.SubMaster([sock,], ignore_alive=[sock])
+    zmq_sleep()
+
+    msg = messaging.new_message(sock)
+    msg.valid = True
+    pub_sock.send(msg.to_bytes())
+    sm.update(1000)
+
+    # Initially alive
+    assert sm.alive[sock] == True
+
+    # Let it go stale
+    time.sleep(0.2)
+    sm.update(0)
+
+    # Now it's NOT alive internally
+    assert sm.alive[sock] == False
+
+    # Run all_alive to check that ignore_alive works correctly
+    assert sm.all_alive() == True
 
   # SubMaster should always conflate
   def test_conflate(self):
