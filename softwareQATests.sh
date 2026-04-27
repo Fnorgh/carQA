@@ -1,8 +1,8 @@
 #!/bin/bash
 
-cd selfdrive || { echo "selfdrive not found"; exit 1; }
-cd car || { echo "car not found"; exit 1; }
-cd SoftwareQA || { echo "SoftwareQA not found"; exit 1; }
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+cd "$REPO_ROOT/selfdrive/car/softwareQA" || { echo "softwareQA not found"; exit 1; }
 
 # ---- docs ----
 
@@ -37,35 +37,19 @@ python test_cruise.py
 cd ..
 
 # ---- cereal messaging tests ----
-
-cd ../../.. || { echo "failed to go back up"; exit 1; }
-
-cd cereal/messaging/tests || { echo "messaging test folder not found"; exit 1; }
-
-# has dependencies that can't really be run in the CI software only
-
-#echo "===== Running messaging tests in: $(pwd) ====="
-
-#for test in test_messaging.py test_pub_sub_master.py test_services.py
-#do
-#echo "Running: $(pwd)/$test"
-#chmod +x "$test" 2>/dev/null
-#python "$test"
-#done
+# skipped: has dependencies that can't really be run in the CI software-only workflow
 
 # ---- release tests ----
 
-cd /c/Projects/carQA || { echo "project root not found"; exit 1; }
-
-cd release || { echo "release folder not found"; exit 1; }
+cd "$REPO_ROOT/release" || { echo "release folder not found"; exit 1; }
 
 echo "===== Running release tests in: $(pwd) ====="
 
 for test in test_pack.py test_release_files.py
 do
-echo "Running: $(pwd)/$test"
-chmod +x "$test" 2>/dev/null
-python "$test"
+  echo "Running: $(pwd)/$test"
+  chmod +x "$test" 2>/dev/null
+  python "$test"
 done
 
 echo "===== All tests complete ====="
