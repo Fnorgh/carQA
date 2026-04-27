@@ -2,7 +2,7 @@
 
 cd selfdrive || { echo "selfdrive not found"; exit 1; }
 cd car || { echo "car not found"; exit 1; }
-cd SoftwareQA || { echo "SoftwareQA not found"; exit 1; }
+cd softwareQA || { echo "softwareQA not found"; exit 1; }
 
 # ---- docs ----
 
