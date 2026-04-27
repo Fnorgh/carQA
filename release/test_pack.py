@@ -1,8 +1,9 @@
 import sys
 import types
 import runpy
+import io
+from contextlib import redirect_stdout, redirect_stderr
 
-# ---- fake the missing openpilot dependency ----
 fake_basedir = types.ModuleType("basedir")
 fake_basedir.BASEDIR = "."
 
@@ -16,12 +17,22 @@ sys.modules["openpilot"] = fake_openpilot
 sys.modules["openpilot.common"] = fake_common
 sys.modules["openpilot.common.basedir"] = fake_basedir
 
-# ---- fake CLI args ----
-sys.argv = ["pack.py", "math"]  # safe built-in module
+sys.argv = ["pack.py", "math"]
 
-# ---- run the script ----
+out = io.StringIO()
+err = io.StringIO()
+
 try:
+  with redirect_stdout(out), redirect_stderr(err):
     runpy.run_path("pack.py", run_name="__main__")
-    print("TEST PASSED: script ran")
-except Exception as e:
-    print("TEST FAILED:", e)
+except SystemExit:
+  pass
+
+output = out.getvalue() + err.getvalue()
+
+if "does not have a main" in output:
+  print("TEST PASSED: pack.py correctly handled module with no main()")
+else:
+  print("TEST FAILED: expected missing main() warning")
+  print(output)
+  sys.exit(1)
