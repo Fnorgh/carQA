@@ -1,10 +1,10 @@
-import os
 import tempfile
 import shutil
 from pathlib import Path
 import types
+import sys
+import re
 
-# ---- create fake directory structure ----
 tmp = tempfile.mkdtemp()
 
 try:
@@ -22,29 +22,27 @@ try:
     (root / "folder").mkdir()
     (root / "folder/file.py").write_text("ok")
 
-    # ---- load your script ----
+    # load release_files.py
     test_module = types.ModuleType("test_script")
 
     with open("release_files.py") as f:
         code = f.read()
 
-    # FIX: define __file__ so script doesn't crash
     test_module.__dict__["__file__"] = "release_files.py"
-
     exec(code, test_module.__dict__)
 
-    # override ROOT to temp dir
+    # point release_files.py logic at fake temp root
     test_module.ROOT = tmp
 
-    print("---- OUTPUT ----")
+    expected = {"good.txt", "folder/file.py"}
+    actual = set()
 
-    import re
-
-    for f in Path(test_module.ROOT).rglob("**/*"):
+    for f in Path(test_module.ROOT).rglob("*"):
         if not (f.is_file() or f.is_symlink()):
             continue
 
-        rf = str(f.relative_to(test_module.ROOT))
+        # normalize Windows backslashes to forward slashes
+        rf = str(f.relative_to(test_module.ROOT)).replace("\\", "/")
 
         blacklisted = any(re.search(p, rf) for p in test_module.blacklist)
         whitelisted = any(re.search(p, rf) for p in test_module.whitelist)
@@ -52,9 +50,20 @@ try:
         if blacklisted and not whitelisted:
             continue
 
-        print(rf)
+        actual.add(rf)
 
+    print("---- OUTPUT ----")
+    for f in sorted(actual):
+        print(f)
     print("---- TEST DONE ----")
+
+    if actual == expected:
+        print("===== TEST_RELEASE_FILES PASSED =====")
+    else:
+        print("===== TEST_RELEASE_FILES FAILED =====")
+        print("Expected:", expected)
+        print("Actual:", actual)
+        sys.exit(1)
 
 finally:
     shutil.rmtree(tmp)
